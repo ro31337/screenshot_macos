@@ -30,34 +30,43 @@ static void initializeIfNeeded() {
     });
 }
 
-SCContentFilter* SCContentFilter_init(uint32_t displayID) {
-    @autoreleasepool {
-        initializeIfNeeded();
-        __block SCContentFilter* filter = nil;
-        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-        [SCShareableContent getShareableContentWithCompletionHandler:^(SCShareableContent * _Nullable content, NSError * _Nullable error) {
+static CGImageRef capture(CGDirectDisplayID id, CGRect diIntersectDisplayLocal, CGColorSpaceRef colorSpace) {
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    __block CGImageRef result = nil;
+    [SCShareableContent getShareableContentWithCompletionHandler:^(SCShareableContent* content, NSError* error) {
+        @autoreleasepool {
             if (error) {
-                NSLog(@"Error getting shareable content: %@", error.localizedDescription);
-            } else {
-                SCDisplay* targetDisplay = nil;
-                for (SCDisplay* display in content.displays) {
-                    if (display.displayID == displayID) {
-                        targetDisplay = display;
-                        break;
-                    }
-                }
-                if (targetDisplay) {
-                    filter = [[SCContentFilter alloc] initWithDisplay:targetDisplay excludingApplications:@[] exceptingWindows:@[]];
-                    NSLog(@"SCContentFilter created successfully for display ID: %d", displayID);
-                } else {
-                    NSLog(@"No matching display found for ID: %d", displayID);
+                dispatch_semaphore_signal(semaphore);
+                return;
+            }
+            SCDisplay* target = nil;
+            for (SCDisplay *display in content.displays) {
+                if (display.displayID == id) {
+                    target = display;
+                    break;
                 }
             }
-            dispatch_semaphore_signal(semaphore);
-        }];
-        dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
-        return filter;
-    }
+            if (!target) {
+                dispatch_semaphore_signal(semaphore);
+                return;
+            }
+            SCContentFilter* filter = [[SCContentFilter alloc] initWithDisplay:target excludingWindows:@[]];
+            SCStreamConfiguration* config = [[SCStreamConfiguration alloc] init];
+            config.sourceRect = diIntersectDisplayLocal;
+            config.width = diIntersectDisplayLocal.size.width;
+            config.height = diIntersectDisplayLocal.size.height;
+            [SCScreenshotManager captureImageWithFilter:filter
+                                          configuration:config
+                                      completionHandler:^(CGImageRef img, NSError* error) {
+                if (!error) {
+                    result = CGImageCreateCopyWithColorSpace(img, colorSpace);
+                }
+                dispatch_semaphore_signal(semaphore);
+            }];
+        }
+    }];
+    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+    return result;
 }
 
 void SCContentFilter_free(SCContentFilter* filter) {
@@ -104,42 +113,6 @@ void SCStreamConfiguration_setShowsCursor(SCStreamConfiguration* config, bool sh
         config.showsCursor = showsCursor;
         NSLog(@"SCStreamConfiguration showsCursor set to: %d", showsCursor);
     }
-}
-
-CGImageRef SCScreenshotManager_captureImage(SCContentFilter* filter, SCStreamConfiguration* config) {
-    __block CGImageRef capturedImage = NULL;
-    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-
-    NSLog(@"Initializing SCStream...");
-    SCStream* stream = [[SCStream alloc] initWithFilter:filter configuration:config delegate:nil];
-
-    NSLog(@"Starting capture...");
-    [stream startCaptureWithCompletionHandler:^(NSError * _Nullable error) {
-        if (error) {
-            NSLog(@"Error starting capture: %@", error.localizedDescription);
-            NSLog(@"Error domain: %@", error.domain);
-            NSLog(@"Error code: %ld", (long)error.code);
-            NSLog(@"Error user info: %@", error.userInfo);
-            dispatch_semaphore_signal(semaphore);
-        } else {
-            NSLog(@"Capture started successfully, attempting to capture screenshot...");
-            [stream stopCaptureWithCompletionHandler:^(NSError * _Nullable error) {
-                if (error) {
-                    NSLog(@"Error stopping capture: %@", error.localizedDescription);
-                    NSLog(@"Error domain: %@", error.domain);
-                    NSLog(@"Error code: %ld", (long)error.code);
-                    NSLog(@"Error user info: %@", error.userInfo);
-                } else {
-                    NSLog(@"Capture stopped successfully");
-                }
-                dispatch_semaphore_signal(semaphore);
-            }];
-        }
-    }];
-
-    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
-    [stream release];
-    return capturedImage;
 }
 
 void SCShareableContent_getDisplayCount(uint32_t* count) {
@@ -226,30 +199,15 @@ func Capture(x, y, width, height int) (*image.RGBA, error) {
 	var displayInfo C.DisplayInfo
 	C.SCShareableContent_getDisplay(C.int(displayIndex), &displayInfo)
 
-	filter := C.SCContentFilter_init(C.uint32_t(displayInfo.displayID))
-	if filter == nil {
-		return nil, errors.New("failed to initialize SCContentFilter")
-	}
-	defer C.SCContentFilter_free(filter)
+	colorSpace := C.CGColorSpaceCreateDeviceRGB()
+	defer C.CGColorSpaceRelease(colorSpace)
 
-	config := C.SCStreamConfiguration_init()
-	if config == nil {
-		return nil, errors.New("failed to initialize SCStreamConfiguration")
-	}
-	defer C.SCStreamConfiguration_free(config)
-
-	C.SCStreamConfiguration_setWidth(config, C.int(width))
-	C.SCStreamConfiguration_setHeight(config, C.int(height))
-	C.SCStreamConfiguration_setShowsCursor(config, C.bool(false))
-
-	cgImage := C.SCScreenshotManager_captureImage(filter, config)
+	cgRect := C.CGRectMake(C.CGFloat(x), C.CGFloat(y), C.CGFloat(width), C.CGFloat(height))
+	cgImage := C.capture(C.CGDirectDisplayID(displayInfo.displayID), cgRect, colorSpace)
 	// if cgImage == nil {
 	// 	return nil, errors.New("failed to capture screenshot")
 	// }
 	defer C.CGImageRelease(cgImage)
-
-	colorSpace := C.CGColorSpaceCreateDeviceRGB()
-	defer C.CGColorSpaceRelease(colorSpace)
 
 	context := C.CGBitmapContextCreate(
 		unsafe.Pointer(&img.Pix[0]),
