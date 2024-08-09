@@ -1,6 +1,6 @@
 # Screen Capture Examples
 
-This repository contains examples of screen capture implementations using different methods.
+This repository contains examples of screen capture implementations using different methods for macOS.
 
 ## Running the Examples
 
@@ -12,8 +12,6 @@ To run the legacy Go implementation:
 go run main_legacy.go
 ```
 
-Note: This implementation is not compilable on MacOS 15 (beta).
-
 ### main_screencapturekit.go
 
 To run the ScreenCaptureKit-based Go implementation:
@@ -21,8 +19,6 @@ To run the ScreenCaptureKit-based Go implementation:
 ```
 go run main_screencapturekit.go
 ```
-
-Note: While this runs without errors, it currently does not produce a screenshot. The capture method implementation is incomplete.
 
 ### demo.swift
 
@@ -34,10 +30,10 @@ swift demo.swift
 
 ## Status
 
-All examples work as expected, except for the following:
+All examples are now working as expected. This project demonstrates different ways of capturing screenshots on macOS:
 
-1. `main_legacy.go` is not compatible with MacOS 15 (beta) and will not compile on this version.
-2. `main_screencapturekit.go` runs without errors but does not produce a screenshot. This is due to an incomplete implementation of the capture method.
+1. `main_legacy.go`: A legacy implementation using older macOS APIs.
+2. `main_screencapturekit.go`: An implementation using the newer ScreenCaptureKit framework, bridged with Objective-C.
+3. `demo.swift`: A Swift implementation using ScreenCaptureKit.
 
-The Swift demo (`demo.swift`) works correctly and produces screenshots as intended.
-
+Originally, this project was created to investigate issues with the Objective-C bridge in `main_screencapturekit.go`. These issues have now been resolved (thanks to this comment https://github.com/kbinani/screenshot/pull/23#issuecomment-2276493808), and all implementations are functioning correctly.
